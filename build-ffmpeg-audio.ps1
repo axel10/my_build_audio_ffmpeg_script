@@ -21,6 +21,18 @@ function Test-Tool {
     }
 }
 
+function Get-OptionalToolPath {
+    param([string[]]$Paths)
+
+    foreach ($path in $Paths) {
+        if (Test-Path -LiteralPath $path) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
 Test-Tool $ffmpegRoot
 Test-Tool (Join-Path $ffmpegRoot 'configure')
 Test-Tool $bash
@@ -32,6 +44,21 @@ $perl = (Get-Command perl -ErrorAction Stop).Source
 Test-Tool $make
 Test-Tool $nasm
 Test-Tool $perl
+
+$ccache = Get-OptionalToolPath @(
+    (Join-Path $mingwBin 'ccache.exe')
+    (Join-Path $usrBin 'ccache.exe')
+)
+
+if ($ccache) {
+    $ccacheDir = Join-Path $repoRoot '.cache\ffmpeg-audio\ccache'
+    New-Item -ItemType Directory -Force -Path $ccacheDir | Out-Null
+    $env:CCACHE_DIR = $ccacheDir
+    $env:CCACHE_BASEDIR = $repoRoot
+    $env:CCACHE_NOHASHDIR = '1'
+    $env:CCACHE_COMPILERCHECK = 'content'
+    Write-Host "Using ccache: $ccache"
+}
 
 Write-Host "[1/4] Preparing MSYS2 environment..."
 $env:PATH = "$mingwBin;$usrBin;$env:PATH"
@@ -59,6 +86,22 @@ $env:BUILD_ROOT = $buildRoot
 $env:INSTALL_ROOT = $installRoot
 $env:JOBS = $Jobs.ToString()
 
+$ccacheBlock = ''
+if ($ccache) {
+    $ccacheBlock = @'
+if command -v ccache >/dev/null 2>&1; then
+  log "Enabling ccache at ${CCACHE_DIR}"
+  configureArgs=(
+    --cc="ccache gcc"
+    --cxx="ccache g++"
+    --dep-cc="ccache gcc"
+    "${configureArgs[@]}"
+  )
+fi
+
+'@
+}
+
 $bashScript = @'
 set -euo pipefail
 
@@ -78,66 +121,82 @@ export PATH=/mingw64/bin:$PATH
 export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
 export MSYSTEM=MINGW64
 
+if [ -n "${CCACHE_DIR:-}" ]; then
+  export CCACHE_DIR="$(cygpath -u "$CCACHE_DIR")"
+fi
+
+if [ -n "${CCACHE_BASEDIR:-}" ]; then
+  export CCACHE_BASEDIR="$(cygpath -u "$CCACHE_BASEDIR")"
+fi
+
 log "Starting FFmpeg configure"
-"$ffmpeg_root/configure" \
-  --prefix="$install_root" \
-  --arch=x86_64 \
-  --target-os=mingw32 \
-  --disable-everything \
-  --disable-autodetect \
-  --disable-debug \
-  --disable-doc \
-  --disable-ffplay \
-  --disable-ffprobe \
-  --disable-avdevice \
-  --disable-swscale \
-  --disable-filters \
-  --enable-small \
-  --enable-gpl \
-  --enable-protocol=file \
-  --enable-protocol=pipe \
-  --enable-parser=aac \
-  --enable-parser=aac_latm \
-  --enable-parser=flac \
-  --enable-parser=mpegaudio \
-  --enable-parser=opus \
-  --enable-bsf=aac_adtstoasc \
-  --enable-decoder=aac \
-  --enable-decoder=aac_latm \
-  --enable-decoder=flac \
-  --enable-decoder=mp3 \
-  --enable-decoder=mp3float \
-  --enable-decoder=opus \
-  --enable-decoder=pcm_alaw \
-  --enable-decoder=pcm_f32le \
-  --enable-decoder=pcm_f64le \
-  --enable-decoder=pcm_mulaw \
-  --enable-decoder=pcm_s16le \
-  --enable-decoder=pcm_s24le \
-  --enable-decoder=pcm_s32le \
-  --enable-decoder=pcm_u8 \
-  --enable-encoder=aac \
-  --enable-encoder=flac \
-  --enable-encoder=libmp3lame \
-  --enable-encoder=libopus \
-  --enable-libopus \
-  --enable-libmp3lame \
-  --enable-demuxer=aac \
-  --enable-demuxer=flac \
-  --enable-demuxer=mp3 \
-  --enable-demuxer=mov \
-  --enable-demuxer=ogg \
-  --enable-demuxer=wav \
-  --enable-demuxer=matroska \
-  --enable-muxer=adts \
-  --enable-muxer=flac \
-  --enable-muxer=ipod \
-  --enable-muxer=matroska \
-  --enable-muxer=mov \
-  --enable-muxer=mp3 \
-  --enable-muxer=ogg \
-  --enable-muxer=opus \
+configureArgs=(
+  --prefix="$install_root"
+  --arch=x86_64
+  --target-os=mingw32
+  --disable-everything
+  --disable-autodetect
+  --disable-debug
+  --disable-doc
+  --disable-ffplay
+  --enable-ffprobe
+  --disable-avdevice
+  --disable-filters
+  --enable-filter=aresample
+  --enable-small
+  --enable-gpl
+  --enable-protocol=file
+  --enable-protocol=pipe
+  --enable-parser=aac
+  --enable-parser=aac_latm
+  --enable-parser=flac
+  --enable-parser=mpegaudio
+  --enable-parser=opus
+  --enable-bsf=aac_adtstoasc
+  --enable-decoder=aac
+  --enable-decoder=aac_latm
+  --enable-decoder=flac
+  --enable-decoder=mjpeg
+  --enable-decoder=mp3
+  --enable-decoder=mp3float
+  --enable-decoder=opus
+  --enable-decoder=pcm_alaw
+  --enable-decoder=pcm_f32le
+  --enable-decoder=pcm_f64le
+  --enable-decoder=pcm_mulaw
+  --enable-decoder=pcm_s16le
+  --enable-decoder=pcm_s24le
+  --enable-decoder=pcm_s32le
+  --enable-decoder=pcm_u8
+  --enable-encoder=aac
+  --enable-encoder=flac
+  --enable-encoder=mjpeg
+  --enable-encoder=libmp3lame
+  --enable-encoder=libopus
+  --enable-libopus
+  --enable-libmp3lame
+  --enable-demuxer=aac
+  --enable-demuxer=flac
+  --enable-demuxer=mp3
+  --enable-demuxer=mov
+  --enable-demuxer=ffmetadata
+  --enable-demuxer=ogg
+  --enable-demuxer=wav
+  --enable-demuxer=matroska
+  --enable-muxer=adts
+  --enable-muxer=flac
+  --enable-muxer=ipod
+  --enable-muxer=matroska
+  --enable-muxer=mov
+  --enable-muxer=mp3
+  --enable-muxer=ogg
+  --enable-muxer=opus
   --enable-muxer=wav
+)
+
+__CCACHE_BLOCK__
+
+"$ffmpeg_root/configure" "${configureArgs[@]}"
 
 log "Starting make -j${JOBS:-1}"
 make -j"${JOBS:-1}"
@@ -149,6 +208,7 @@ log "Build finished"
 '@
 
 $scriptPath = Join-Path $buildRoot 'build_ffmpeg_audio.sh'
+$bashScript = $bashScript.Replace('__CCACHE_BLOCK__', $ccacheBlock)
 Set-Content -LiteralPath $scriptPath -Value $bashScript -Encoding Ascii
 
 $scriptUnixPath = & $bash -lc "cygpath -u '$scriptPath'"
