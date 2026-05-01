@@ -134,6 +134,8 @@ configureArgs=(
   --prefix="$install_root"
   --arch=x86_64
   --target-os=mingw32
+  --pkg-config-flags="--static"
+  --extra-ldflags="-static"
   --disable-everything
   --disable-autodetect
   --disable-debug
