@@ -10,7 +10,7 @@ Options:
   --jobs N     Number of parallel jobs for make. Defaults to the CPU count.
   --sdk PATH   Path to the Android SDK. Defaults to ~/Android/Sdk.
   --api LEVEL  Android API level. Defaults to 21.
-  --abi ABI    Target ABI (arm64-v8a, armeabi-v7a, x86_64, x86). Defaults to arm64-v8a.
+  --abi ABI    Target ABI. Can be specified multiple times. Defaults to arm64-v8a and armeabi-v7a.
   -h, --help   Show this help message.
 EOF
 }
@@ -19,7 +19,7 @@ clean=false
 jobs=""
 sdk_root="$HOME/Android/Sdk"
 api_level=21
-abi="arm64-v8a"
+abis=()
 
 while (($#)); do
   case "$1" in
@@ -40,7 +40,7 @@ while (($#)); do
       shift 2
       ;;
     --abi)
-      abi="$2"
+      abis+=("$2")
       shift 2
       ;;
     -h|--help)
@@ -55,11 +55,17 @@ while (($#)); do
   esac
 done
 
+if [[ ${#abis[@]} -eq 0 ]]; then
+  abis=("arm64-v8a" "armeabi-v7a")
+fi
+
+if [[ -z "$jobs" ]]; then
+  jobs="$(nproc 2>/dev/null || echo 1)"
+fi
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$script_dir"
 ffmpeg_root="$repo_root/ffmpeg"
-build_root="$repo_root/build/ffmpeg-android-$abi"
-install_root="$build_root/install"
 
 log() {
   printf '[%(%H:%M:%S)T] %s\n' -1 "$*"
@@ -93,7 +99,13 @@ if [[ ! -d "$toolchain_bin" ]]; then
   exit 1
 fi
 
-case "$abi" in
+for abi in "${abis[@]}"; do
+  build_root="$repo_root/build/ffmpeg-android-$abi"
+  install_root="$build_root/install"
+
+  log "Building for ABI: $abi"
+
+  case "$abi" in
   arm64-v8a)
     arch="aarch64"
     cpu="armv8-a"
@@ -139,9 +151,6 @@ fi
 mkdir -p "$build_root" "$install_root"
 cd "$build_root"
 
-if [[ -z "$jobs" ]]; then
-  jobs="$(nproc 2>/dev/null || echo 1)"
-fi
 
 configure_args=(
   --prefix="$install_root"
@@ -244,4 +253,7 @@ make -j"$jobs"
 log "Starting make install"
 make install
 
-log "Build finished. Installation at: $install_root"
+  log "Build finished for $abi. Installation at: $install_root"
+done
+
+log "All builds finished."
