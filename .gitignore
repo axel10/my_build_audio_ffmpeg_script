@@ -1,1 +1,5 @@
 build
+*.mp3
+*.aac
+*.m4a
+*.opus
