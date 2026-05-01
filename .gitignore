@@ -4,3 +4,4 @@ build
 *.m4a
 *.opus
 *.flac
+.cache/
