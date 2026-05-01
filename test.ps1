@@ -297,9 +297,18 @@ if (-not $coverInfo) {
 $mp3 = Join-Path $outdir 'test.mp3'
 $opus = Join-Path $outdir 'test.opus'
 $flac = Join-Path $outdir 'test.flac'
-$m4a = Join-Path $outdir 'test.m4a'
 
-Remove-Item -LiteralPath $mp3, $opus, $flac, $m4a, $metaFile -Force -ErrorAction SilentlyContinue
+$m4a_configs = @(
+    @{ name = 'cbr_128k'; type = 'cbr'; value = '128k' },
+    @{ name = 'cbr_192k'; type = 'cbr'; value = '192k' },
+    @{ name = 'vbr_0.6';  type = 'vbr'; value = '0.6' },
+    @{ name = 'vbr_1.0';  type = 'vbr'; value = '1' },
+    @{ name = 'vbr_2.0';  type = 'vbr'; value = '2' }
+)
+
+$m4a_files = $m4a_configs | ForEach-Object { Join-Path $outdir "test_$($_.name).m4a" }
+
+Remove-Item -LiteralPath ($mp3, $opus, $flac, $metaFile + $m4a_files) -Force -ErrorAction SilentlyContinue
 
 if ($coverInfo.PictureBase64) {
     Write-FfMetadataFile -Path $metaFile -Metadata $coverInfo.Metadata
@@ -352,7 +361,7 @@ $opusArgs += @(
 )
 Invoke-Ffmpeg $opusArgs
 
-Write-Host '[3/4] FLAC'
+Write-Host '[3/8] FLAC'
 Invoke-Ffmpeg @(
     '-hide_banner', '-y',
     '-i', $input,
@@ -368,22 +377,39 @@ Invoke-Ffmpeg @(
     $flac
 )
 
-Write-Host '[4/4] M4A'
-Invoke-Ffmpeg @(
-    '-hide_banner', '-y',
-    '-i', $input,
-    '-map', '0:a:0',
-    '-map', '0:v?',
-    '-map_metadata', '0',
-    '-map_chapters', '0',
-    '-c:a', 'aac',
-    '-c:v', 'mjpeg',
-    '-disposition:v:0', 'attached_pic',
-    '-metadata:s:v:0', 'title=Cover',
-    '-metadata:s:v:0', 'comment=Cover (front)',
-    '-movflags', '+faststart',
-    $m4a
-)
+for ($i = 0; $i -lt $m4a_configs.Length; $i++) {
+    $config = $m4a_configs[$i]
+    $m4a_file = $m4a_files[$i]
+    $step = 4 + $i
+    Write-Host "[$step/8] M4A ($($config.name))"
+    
+    $args = @(
+        '-hide_banner', '-y',
+        '-i', $input,
+        '-map', '0:a:0',
+        '-map', '0:v?',
+        '-map_metadata', '0',
+        '-map_chapters', '0',
+        '-c:a', 'aac'
+    )
+    
+    if ($config.type -eq 'cbr') {
+        $args += '-b:a', $config.value
+    } else {
+        $args += '-q:a', $config.value
+    }
+    
+    $args += @(
+        '-c:v', 'mjpeg',
+        '-disposition:v:0', 'attached_pic',
+        '-metadata:s:v:0', 'title=Cover',
+        '-metadata:s:v:0', 'comment=Cover (front)',
+        '-movflags', '+faststart',
+        $m4a_file
+    )
+    
+    Invoke-Ffmpeg $args
+}
 
 if ($coverInfo.PictureBase64) {
     Write-Host 'Prepared Opus metadata with embedded cover art.'
